@@ -39,41 +39,60 @@ from app.db import QueryResult, UnsafeQueryError, run_query
 MAX_SQL_ATTEMPTS = 3
 
 SCHEMA_DESCRIPTION = """
-ESQUEMA DO BANCO (cinerocket.db, modelo dimensional / estrela):
+ESQUEMA DO BANCO (cinerocket.db, modelo dimensional / estrela). Os nomes de
+tabela/coluna abaixo foram conferidos direto no banco (PRAGMA table_info) —
+use EXATAMENTE esses nomes, não invente variações.
 
 dim_movies (95.645 filmes) — chave: sk_movie_id (texto, hash)
-  titulo, titulo_original, ano_lancamento (2016–2029), idioma_original,
-  status_filme (ex: 'Released'), duracao_minutos, sinopse, url_poster,
-  nota_tmdb, qtd_votos_tmdb, popularidade_tmdb, nota_imdb, qtd_votos_imdb
+  id_filme, titulo, data_lancamento, ano_lancamento, duracao_minutos,
+  idioma_original (ATENÇÃO: sempre NULL no banco inteiro, não use em filtro),
+  status_filme (valores possíveis: 'Lançado', 'Pós-Produção', 'Em Produção',
+  'Planejado'), sinopse, url_poster, url_backdrop.
+  NÃO existem nota/popularidade/votos nesta tabela — isso fica em
+  fact_movies_performance (ver abaixo). NÃO existe coluna titulo_original.
 
 fact_movies_performance (95.645 linhas, 1:1 com dim_movies) — chave: sk_movie_id
-  orcamento_usd, receita_usd, orcamento_brl, receita_brl, lucro_usd, lucro_brl
-  ATENÇÃO: dados financeiros são ESPARSOS. Só ~3.370 filmes têm receita_brl
-  preenchida e só ~1.630 têm orçamento E receita preenchidos. SEMPRE filtre
-  com "WHERE receita_brl IS NOT NULL" (e/ou orcamento_brl) em perguntas sobre
-  bilheteria/lucro/margem.
+  orcamento_usd, receita_usd, lucro_usd, orcamento_brl, receita_brl, lucro_brl,
+  popularidade, nota_tmdb, qtd_tmdb, nota_imdb, qtd_imdb.
+  ATENÇÃO (dados esparsos, confira sempre com IS NOT NULL antes de usar):
+  - orcamento_brl/usd: preenchido em ~8% dos filmes (~7.900 de 95.645).
+  - receita_brl/usd: preenchido em ~3,5% dos filmes (~3.370 de 95.645).
+  - lucro_brl/usd: CUIDADO — essa coluna vem preenchida (às vezes com 0) para
+    quase todos os filmes MESMO quando orcamento/receita estão NULL. Nunca
+    use lucro_brl/usd sozinho como indicador de "tem dado financeiro"; sempre
+    filtre por receita_brl IS NOT NULL (e orcamento_brl IS NOT NULL quando a
+    pergunta envolver margem/lucro) antes de calcular ou ordenar por lucro.
+  - popularidade, nota_tmdb, qtd_tmdb, nota_imdb, qtd_imdb: bem mais completos
+    (85–100% preenchidos), mas ainda pode haver NULL — filtre quando for
+    comparar ou ordenar por eles.
 
 dim_genres (19 gêneros) — sk_genre_id, nome_genero (em inglês: Action, Drama, Comedy, ...)
 bridge_movie_genre — sk_movie_id, sk_genre_id (N:N entre filmes e gêneros)
 
-dim_companies (45.941 produtoras) — sk_company_id, nome_empresa
+dim_companies (45.941 produtoras) — sk_company_id, nome_produtora
 bridge_movie_company — sk_movie_id, sk_company_id (N:N entre filmes e produtoras)
 
 dim_people (424.656 pessoas) — sk_person_id, nome_pessoa, tipo_pessoa
-  (tipo_pessoa é um dos três valores: 'Diretor', 'Ator', 'Roteirista')
-bridge_movie_person — sk_movie_id, sk_person_id, tipo_pessoa (papel da pessoa
-  naquele filme especificamente; uma pessoa pode ter mais de um papel/filme)
+  (tipo_pessoa é um dos três valores: 'Diretor', 'Ator', 'Roteirista' — essa é
+  a ÚNICA tabela que tem essa coluna de papel/função da pessoa)
+bridge_movie_person — sk_movie_id, sk_person_id (N:N entre filmes e pessoas;
+  NÃO tem coluna tipo_pessoa — pra saber o papel da pessoa, faça JOIN com
+  dim_people e use dim_people.tipo_pessoa)
 
-dim_reviews (40.267 filmes com pelo menos 1 avaliação) — sk_movie_id,
-  qtd_avaliacoes_usuarios, nota_media_usuarios (0 a 10)
-  Já traz o agregado por filme (contagem + média). Prefira usá-la para
-  perguntas de "nota média" / "mais avaliados".
+dim_reviews (40.267 filmes com pelo menos 1 avaliação) — sk_review_id,
+  sk_movie_id, qtd_avaliacoes_usuarios, nota_media_usuarios (0 a 10)
+  Já traz o agregado por filme (contagem + média, idêntico ao que se obtém
+  agregando movie_reviews). Prefira usá-la para perguntas de "nota média" /
+  "mais avaliados" em vez de agregar movie_reviews na mão. ATENÇÃO: o número
+  de avaliações por filme é BAIXO (no máximo ~13 no banco inteiro) — não
+  assuma que existem filmes com dezenas ou centenas de avaliações.
 
 movie_reviews (43.666 avaliações individuais) — id, sk_movie_review_id,
   sk_movie_id, name (nome de quem avaliou), rating (0 a 10), text, created_at
 
 Todas as tabelas de fato/bridge se relacionam a dim_movies por sk_movie_id.
-Nomes de tabelas e colunas são exatamente como escrito acima.
+Nomes de tabelas e colunas são exatamente como escrito acima — não existem
+outras colunas além das listadas.
 """.strip()
 
 SQL_SYSTEM_PROMPT = f"""
