@@ -19,7 +19,7 @@ class Settings(BaseSettings):
 
     # Guardrails de execução de SQL
     sql_max_rows: int = 200
-    sql_timeout_seconds: int = 10
+    sql_timeout_seconds: int = 15
 
 
 settings = Settings()
