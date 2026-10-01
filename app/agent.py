@@ -105,6 +105,15 @@ REGRAS:
 - Em perguntas de "top N" / listagem, use LIMIT.
 - Em perguntas de bilheteria/lucro/margem, filtre os campos financeiros
   relevantes com IS NOT NULL, pois são esparsos.
+- O banco tem TRÊS "notas" diferentes e a pergunta pode não dizer qual quer:
+  nota_imdb e nota_tmdb (em fact_movies_performance, notas "oficiais" do
+  filme, bem mais completas) e nota_media_usuarios (em dim_reviews, nota
+  interna calculada a partir de avaliações de usuários — é MUITO esparsa,
+  poucos filmes têm mais que 2-3 avaliações, então é pouco confiável pra
+  rankings). Se a pergunta falar só em "nota"/"nota média" sem especificar
+  de quem (ex: "diretores com maior nota média"), use nota_imdb como padrão.
+  Só use nota_media_usuarios quando a pergunta mencionar explicitamente
+  "avaliação(ões) de usuários" ou "nota dos usuários".
 - Use exatamente os nomes de tabela/coluna do schema abaixo.
 
 {SCHEMA_DESCRIPTION}
@@ -121,6 +130,9 @@ direto e claro, citando os números relevantes.
   para essa pergunta (não invente um resultado).
 - Se os dados parecerem parciais (ex: poucos filmes com receita informada),
   mencione essa limitação na resposta.
+- Se a pergunta mencionava "nota"/"nota média" de forma ambígua (sem dizer
+  TMDB, IMDb ou usuários) e os dados vieram da nota do IMDb (padrão nesse
+  caso), deixe isso claro na resposta (ex: "com base na nota do IMDb").
 - Não repita o SQL nem fale sobre "a consulta" — responda como se estivesse
   conversando diretamente com a pessoa que perguntou.
 """.strip()
