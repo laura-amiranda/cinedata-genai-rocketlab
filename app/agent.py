@@ -62,9 +62,15 @@ fact_movies_performance (95.645 linhas, 1:1 com dim_movies) — chave: sk_movie_
     use lucro_brl/usd sozinho como indicador de "tem dado financeiro"; sempre
     filtre por receita_brl IS NOT NULL (e orcamento_brl IS NOT NULL quando a
     pergunta envolver margem/lucro) antes de calcular ou ordenar por lucro.
-  - popularidade, nota_tmdb, qtd_tmdb, nota_imdb, qtd_imdb: bem mais completos
-    (85–100% preenchidos), mas ainda pode haver NULL — filtre quando for
-    comparar ou ordenar por eles.
+  - popularidade, nota_tmdb, qtd_tmdb, nota_imdb, qtd_imdb: a coluna em si é
+    bem mais completa (85–100% não-NULL), mas CUIDADO: nota_tmdb usa 0 (não
+    NULL) pra representar "sem avaliação" — ~36.000 filmes têm nota_tmdb = 0
+    E qtd_tmdb = 0 ao mesmo tempo (ou seja, filme nunca avaliado, não é uma
+    nota real de zero). Em perguntas de ranking/divergência/comparação
+    envolvendo nota_tmdb, filtre também por qtd_tmdb > 0 (não só
+    nota_tmdb IS NOT NULL), senão filmes "sem avaliação" poluem o resultado
+    como se fossem notas baixas reais. nota_imdb não tem esse problema (é
+    quase sempre uma nota real quando preenchida).
 
 dim_genres (19 gêneros) — sk_genre_id, nome_genero (em inglês: Action, Drama, Comedy, ...)
 bridge_movie_genre — sk_movie_id, sk_genre_id (N:N entre filmes e gêneros)
