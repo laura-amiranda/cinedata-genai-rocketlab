@@ -38,6 +38,44 @@ from app.db import QueryResult, UnsafeQueryError, run_query
 
 MAX_SQL_ATTEMPTS = 3
 
+# Guardrail determinístico de INTENÇÃO, separado do guardrail de SQL do
+# db.py. O db.py bloqueia a *query* se ela tentar escrever — mas se a
+# pergunta pedir uma operação de escrita (ex: "apague os filmes de Horror"),
+# o sql_agent pode gerar um SELECT "inofensivo" (ex: buscando os IDs que
+# seriam apagados) e o answer_agent pode responder como se um próximo passo
+# de escrita fosse possível, o que é enganoso: este agente nunca escreve no
+# banco. Por isso, perguntas com intenção de escrita são recusadas aqui,
+# antes de qualquer chamada ao LLM (também economiza cota da OpenRouter).
+WRITE_INTENT_KEYWORDS = (
+    "apag",  # apague, apagar, apagando
+    "delet",  # deletar, delete
+    "exclu",  # exclua, excluir, exclusão
+    "remov",  # remova, remover, removido
+    "atualiz",  # atualize, atualizar, atualização
+    "insir",  # insira
+    "inserir",
+    "modific",  # modifique, modificar
+    "alter",  # altere, alterar (cuidado: também casa "alternativa", aceitável aqui)
+    "sobrescrev",  # sobrescrever, sobrescreva
+    "drop",
+    "truncat",  # truncate, truncar
+    "update",
+    "insert",
+    "delete",
+)
+
+RECUSA_ESCRITA = (
+    "Não posso fazer isso — este agente só executa consultas de leitura "
+    "sobre o catálogo de filmes (SELECT), nunca inserção, atualização ou "
+    "exclusão de dados. Se quiser, posso responder perguntas sobre esses "
+    "filmes em vez de alterá-los (ex: quantos são, quais notas têm, etc.)."
+)
+
+
+def _tem_intencao_de_escrita(pergunta: str) -> bool:
+    texto = pergunta.lower()
+    return any(keyword in texto for keyword in WRITE_INTENT_KEYWORDS)
+
 SCHEMA_DESCRIPTION = """
 ESQUEMA DO BANCO (cinerocket.db, modelo dimensional / estrela). Os nomes de
 tabela/coluna abaixo foram conferidos direto no banco (PRAGMA table_info) —
@@ -111,6 +149,15 @@ REGRAS:
 - Em perguntas de "top N" / listagem, use LIMIT.
 - Em perguntas de bilheteria/lucro/margem, filtre os campos financeiros
   relevantes com IS NOT NULL, pois são esparsos.
+- CUIDADO com "margem de lucro MÉDIA" agrupada (ex: por gênero/produtora):
+  o banco tem alguns orcamento_brl/usd com valores absurdamente baixos (ex:
+  R$ 712 para um filme, claramente um erro de dado, não um orçamento real).
+  Calcular AVG(lucro/orcamento) por filme e depois agrupar é MUITO sensível
+  a esses outliers (um único filme com orçamento quase zero pode dominar a
+  média inteira do grupo). Prefira SEMPRE a margem agregada:
+  SUM(lucro_brl) / SUM(orcamento_brl) por grupo, em vez de
+  AVG(lucro_brl / orcamento_brl) por filme — dá um resultado muito mais
+  robusto e condizente com a realidade dos dados.
 - O banco tem TRÊS "notas" diferentes e a pergunta pode não dizer qual quer:
   nota_imdb e nota_tmdb (em fact_movies_performance, notas "oficiais" do
   filme, bem mais completas) e nota_media_usuarios (em dim_reviews, nota
@@ -136,6 +183,13 @@ direto e claro, citando os números relevantes.
   para essa pergunta (não invente um resultado).
 - Se os dados parecerem parciais (ex: poucos filmes com receita informada),
   mencione essa limitação na resposta.
+- Se a pergunta pedir um superlativo ("qual É o maior/melhor/menor...") e os
+  dados trouxerem exatamente 1 linha, isso JÁ É a resposta completa — a
+  consulta SQL já ordenou e limitou o resultado pra trazer só o vencedor de
+  propósito. NÃO diga que "só veio 1 registro, não dá pra comparar" ou que
+  faltam dados pra fazer um ranking — isso é um erro de interpretação, a
+  pergunta pedia só o topo mesmo, e 1 linha é o esperado. Responda
+  diretamente qual é o vencedor e o valor.
 - Se a pergunta mencionava "nota"/"nota média" de forma ambígua (sem dizer
   TMDB, IMDb ou usuários) e os dados vieram da nota do IMDb (padrão nesse
   caso), deixe isso claro na resposta (ex: "com base na nota do IMDb").
@@ -191,6 +245,9 @@ answer_agent = build_answer_agent()
 def ask(pergunta: str) -> tuple[str, list[str]]:
     """Executa o pipeline de ponta a ponta para uma pergunta e retorna
     (resposta_em_texto, lista_de_sqls_tentados)."""
+    if _tem_intencao_de_escrita(pergunta):
+        return RECUSA_ESCRITA, []
+
     tentativas: list[str] = []
 
     plan_result = sql_agent.run_sync(pergunta)
